@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>串口实时监视器 - JustFloat</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js">
+</script>
+<style>
+  /* ========== 全局重置 & 暗色主题 ========== */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', 'PingFang SC', Roboto, sans-serif;
+    background: #0d1117;
+    color: #c9d1d9;
+    min-height: 100vh;
+    padding: 20px;
+  }
+  /* ========== 顶部栏 ========== */
+  .header {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 12px;
+    background: #161b22; border: 1px solid #30363d; border-radius: 10px;
+    padding: 14px 20px; margin-bottom: 16px;
+  }
+  .header h1 {
+    font-size: 18px; font-weight: 600; margin-right: auto;
+    background: linear-gradient(135deg, #58a6ff, #3fb950);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .header label { font-size: 13px; color: #8b949e; }
+  .header select, .header button, .header input {
+    background: #21262d; border: 1px solid #30363d; border-radius: 6px;
+    color: #c9d1d9; padding: 6px 12px; font-size: 13px; outline: none;
+  }
+  .header select:focus, .header input:focus { border-color: #58a6ff; }
+  .header button {
+    cursor: pointer; font-weight: 500;
+    background: #238636; border-color: #2ea043;
+    transition: background .2s;
+  }
+  .header button:hover { background: #2ea043; }
+  .header button.disconnect { background: #da3633; border-color: #f85149; }
+  .header button.disconnect:hover { background: #f85149; }
+  .header .status {
+    display: inline-block; width: 10px; height: 10px;
+    border-radius: 50%; background: #484f58;
+  }
+  .header .status.online { background: #3fb950; box-shadow: 0 0 8px #3fb95088; }
+  .header .status.waiting { background: #d29922; animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .4; } }
+
+  /* ========== 图表区域 ========== */
+  .chart-wrap {
+    background: #161b22; border: 1px solid #30363d; border-radius: 10px;
+    padding: 16px; margin-bottom: 16px;
+  }
+  .chart-wrap canvas { max-height: 340px; }
+
+  /* ========== 数值卡片 ========== */
+  .cards {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px; margin-bottom: 16px;
+  }
+  .card {
+    background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+    padding: 12px; text-align: center;
+  }
+  .card .label { font-size: 11px; color: #8b949e; text-transform: uppercase;
+                 letter-spacing: .5px; }
+  .card .value { font-size: 22px; font-weight: 700; margin-top: 4px;
+                 font-variant-numeric: tabular-nums; }
+  .card .unit { font-size: 12px; color: #8b949e; margin-left: 2px; }
+
+  /* 每张卡片的颜色条 */
+  .card { border-top: 3px solid var(--clr, #58a6ff); }
+
+  /* ========== 命令区域 ========== */
+  .cmd-bar {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+    background: #161b22; border: 1px solid #30363d; border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 16px;
+  }
+  .cmd-bar label { font-size: 13px; color: #8b949e; }
+  .cmd-bar input[type="text"] {
+    flex: 1; min-width: 160px;
+    background: #21262d; border: 1px solid #30363d; border-radius: 6px;
+    color: #c9d1d9; padding: 6px 12px; font-size: 13px; outline: none;
+  }
+  .cmd-bar input[type="text"]:focus { border-color: #58a6ff; }
+  .cmd-bar .btn-send {
+    background: #1f6feb; border: 1px solid #388bfd; border-radius: 6px;
+    color: #fff; padding: 6px 16px; font-size: 13px; cursor: pointer;
+  }
+  .cmd-bar .btn-send:hover { background: #388bfd; }
+  .cmd-quick {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;
+  }
+  .cmd-quick button {
+    background: #21262d; border: 1px solid #30363d; border-radius: 4px;
+    color: #c9d1d9; padding: 3px 10px; font-size: 12px; cursor: pointer;
+    transition: all .15s;
+  }
+  .cmd-quick button:hover {
+    background: #30363d; border-color: #58a6ff; color: #58a6ff;
+  }
+
+  /* ========== 日志 ========== */
+  .log-wrap {
+    background: #161b22; border: 1px solid #30363d; border-radius: 10px;
+    padding: 12px 16px;
+  }
+  .log-wrap h3 { font-size: 13px; font-weight: 600; margin-bottom: 6px;
+                 color: #8b949e; }
+  .log-wrap pre {
+    background: #0d1117; border-radius: 6px; padding: 10px;
+    font-size: 12px; max-height: 160px; overflow-y: auto;
+    color: #8b949e; line-height: 1.5;
+  }
+  .log-wrap pre .ts { color: #484f58; }
+  .log-wrap pre .info { color: #58a6ff; }
+  .log-wrap pre .data { color: #a5d6ff; }
+  .log-wrap pre .ok   { color: #3fb950; }
+  .log-wrap pre .warn { color: #d29922; }
+  .log-wrap pre .err  { color: #f85149; }
+
+  /* ========== 响应式 ========== */
+  @media (max-width: 600px) {
+    .header { flex-direction: column; align-items: stretch; }
+    .header h1 { margin-right: 0; }
+    .cmd-bar { flex-direction: column; }
+    .cards { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<!-- ========== 顶部栏 ========== -->
+<div class="header">
+  <h1>🔌 串口监视器</h1>
+  <label>端口</label>
+  <select id="portSelect"><option value="">—</option></select>
+  <label>波特率</label>
+  <select id="baudSelect">
+    <option>9600</option><option>19200</option><option>38400</option>
+    <option>57600</option><option selected>115200</option>
+    <option>230400</option><option>460800</option><option>921600</option>
+  </select>
+  <button id="btnConnect">连接</button>
+  <span class="status" id="statusLed"></span>
+  <span id="statusText" style="font-size:13px;color:#8b949e;">未连接</span>
+</div>
+
+<!-- ========== 图表 ========== -->
+<div class="chart-wrap">
+  <canvas id="chartCanvas"></canvas>
+</div>
+
+<!-- ========== 数值卡片 ========== -->
+<div class="cards" id="cardsContainer">
+  <div class="card" style="--clr:#ff6384"><div class="label">M1 目标速度</div><div class="value" id="v0">—</div></div>
+  <div class="card" style="--clr:#36a2eb"><div class="label">M1 目标角度</div><div class="value" id="v1">—</div></div>
+  <div class="card" style="--clr:#ffce56"><div class="label">M1 当前速度</div><div class="value" id="v2">—</div></div>
+  <div class="card" style="--clr:#4bc0c0"><div class="label">M2 目标速度</div><div class="value" id="v3">—</div></div>
+  <div class="card" style="--clr:#9966ff"><div class="label">M2 目标角度</div><div class="value" id="v4">—</div></div>
+  <div class="card" style="--clr:#ff9f40"><div class="label">M2 当前速度</div><div class="value" id="v5">—</div></div>
+</div>
+
+<!-- ========== 命令栏 ========== -->
+<div class="cmd-bar">
+  <label>📤 命令</label>
+  <input type="text" id="cmdInput" placeholder="输入命令（不含 $），如 spd1, kp, all, help" />
+  <button class="btn-send" id="btnSendCmd">发送</button>
+  <div class="cmd-quick">
+    <button data-cmd="help">❓help</button>
+    <button data-cmd="spd1">⚡spd1</button>
+    <button data-cmd="spd2">⚡spd2</button>
+    <button data-cmd="enc1">🔢enc1</button>
+    <button data-cmd="enc2">🔢enc2</button>
+    <button data-cmd="kp">🎛️kp</button>
+    <button data-cmd="ki">🎛️ki</button>
+    <button data-cmd="kd">🎛️kd</button>
+    <button data-cmd="all">📊all</button>
+  </div>
+</div>
+
+<!-- ========== 日志 ========== -->
+<div class="log-wrap">
+  <h3>📋 日志</h3>
+  <pre id="logArea">等待连接…</pre>
+</div>
+
+<script>
+// ============================================================
+//  全局状态
+// ============================================================
+let port = null;
+let reader = null;
+let writer = null;
+let keepReading = false;
+
+// JustFloat 缓冲区 & 解析状态
+let buf = new Uint8Array(0);
+const TAIL = new Uint8Array([0x00, 0x00, 0x80, 0x7f]);
+
+// 通道名称
+const CH_NAMES = ['M1目标速度','M1目标角度','M1当前速度',
+                  'M2目标速度','M2目标角度','M2当前速度'];
+const CH_COLORS = ['#ff6384','#36a2eb','#ffce56',
+                   '#4bc0c0','#9966ff','#ff9f40'];
+const CH_UNITS  = ['rpm','rad','rpm','rpm','rad','rpm'];
+
+// 最新数值（用于卡片 & 图表）
+let latestValues = new Array(6).fill(0);
+let dataHistory = Array.from({length:6}, () => []);
+const MAX_POINTS = 200;
+
+// ============================================================
+//  Chart.js 初始化
+// ============================================================
+const ctx = document.getElementById('chartCanvas').getContext('2d');
+const chart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: CH_NAMES.map((name, i) => ({
+      label: name,
+      data: [],
+      borderColor: CH_COLORS[i],
+      backgroundColor: CH_COLORS[i] + '22',
+      borderWidth: 1.5,
+      pointRadius: 0,
+      tension: 0.2,
+      fill: false,
+    }))
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 0 },
+    plugins: {
+      legend: {
+        position: 'top',
+        labels: { color: '#8b949e', boxWidth: 12, padding: 12, font: {size:11} }
+      }
+    },
+    scales: {
+      x: {
+        display: true,
+        ticks: { color: '#484f58', maxTicksLimit: 10, font: {size:10} },
+        grid: { color: '#21262d' }
+      },
+      y: {
+        ticks: { color: '#484f58', font: {size:10} },
+        grid: { color: '#21262d' }
+      }
+    },
+    interaction: {
+      intersect: false,
+      mode: 'nearest'
+    }
+  }
+});
+
+// ============================================================
+//  工具函数
+// ============================================================
+function log(msg, cls = 'info') {
+  const el = document.getElementById('logArea');
+  const t = new Date().toLocaleTimeString();
+  el.innerHTML += `<span class="ts">[${t}]</span> <span class="${cls}">${msg}</span>\n`;
+  el.scrollTop = el.scrollHeight;
+}
+
+/** 在 Uint8Array 中搜索尾帧，返回首次出现的索引，-1 表示未找到 */
+function findTail(arr) {
+  for (let i = 0; i <= arr.length - 4; i++) {
+    if (arr[i] === TAIL[0] && arr[i+1] === TAIL[1] &&
+        arr[i+2] === TAIL[2] && arr[i+3] === TAIL[3]) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/** 解析 JustFloat 数据帧：从 arr 中提取前 tailPos 字节为 float 数组 */
+function parseJustFloat(arr, tailPos) {
+  const count = tailPos / 4;
+  const dv = new DataView(arr.buffer, arr.byteOffset, tailPos);
+  const values = [];
+  for (let i = 0; i < count; i++) {
+    values.push(dv.getFloat32(i * 4, true));
+  }
+  return values;
+}
+
+/** 将新数据追加到历史并刷新图表 */
+function pushAndChart(values) {
+  const now = Date.now();
+  for (let ch = 0; ch < 6; ch++) {
+    dataHistory[ch].push({ x: now, y: values[ch] });
+    if (dataHistory[ch].length > MAX_POINTS) {
+      dataHistory[ch].shift();
+    }
+  }
+  const labels = dataHistory[0].map(p =>
+    new Date(p.x).toLocaleTimeString() + '.' + String(p.x % 1000).padStart(3,'0')
+  );
+  chart.data.labels = labels;
+  for (let ch = 0; ch < 6; ch++) {
+    chart.data.datasets[ch].data = dataHistory[ch].map(p => p.y);
+  }
+  chart.update('none');
+}
+
+/** 更新数字卡片 */
+function updateCards(values) {
+  for (let i = 0; i < 6; i++) {
+    const el = document.getElementById(`v${i}`);
+    if (el) {
+      const v = values[i];
+      el.textContent = Number.isFinite(v) ? v.toFixed(2) : '—';
+    }
+  }
+}
+
+// ============================================================
+//  串口数据读取循环
+// ============================================================
+async function readLoop() {
+  const decoder = new TextDecoder();
+  let textBuf = '';
+
+  while (keepReading && reader) {
+    try {
+      const { value, done } = await reader.read();
+      if (done) { log('串口数据流已结束', 'warn'); break; }
+
+      // 记录收到的字节数（调试用）
+      if (buf.length === 0 && value.length > 0) {
+        log(`📥 收到 ${value.length} 字节原始数据`, 'data');
+      }
+
+      // --- 将新数据追加到缓冲区 ---
+      const tmp = new Uint8Array(buf.length + value.length);
+      tmp.set(buf);
+      tmp.set(value, buf.length);
+      buf = tmp;
+
+      // --- 循环解析 JustFloat 帧 ---
+      let framesParsed = 0;
+      while (true) {
+        const tailPos = findTail(buf);
+        if (tailPos < 0 || tailPos < 4) break;
+
+        // tailPos 必须对齐 4 字节
+        if (tailPos % 4 !== 0) {
+          buf = buf.slice(tailPos + 4);
+          continue;
+        }
+
+        const values = parseJustFloat(buf, tailPos);
+        framesParsed++;
+
+        // 补齐到 6 通道
+        while (values.length < 6) values.push(0);
+        latestValues = values;
+        updateCards(values);
+        pushAndChart(values);
+
+        // 丢弃已解析的帧（数据 + 尾帧）
+        buf = buf.slice(tailPos + 4);
+      }
+
+      // 首次收到有效帧时提示
+      if (framesParsed > 0 && !window._gotFirstFrame) {
+        window._gotFirstFrame = true;
+        log('✅ 成功解析 JustFloat 数据帧！', 'ok');
+      }
+
+      // 防止缓冲区无限增长（保留尾部 2048 字节）
+      if (buf.length > 4096) {
+        buf = buf.slice(-2048);
+      }
+
+      // --- 文本响应行解码（启发式过滤二进制噪声） ---
+      textBuf += decoder.decode(value, { stream: true });
+      const lines = textBuf.split('\n');
+      textBuf = lines.pop() || '';
+      for (const raw of lines) {
+        const line = raw.replace(/\r$/, '').trim();
+        if (line.length === 0) continue;
+        const isLikelyText =
+          /^\w[\w\s]*(:\s*[-\d.])/.test(line) ||
+          /^---/.test(line) ||
+          /^(unknown|available)/i.test(line);
+        if (isLikelyText) {
+          log('← ' + line, 'ok');
+        }
+      }
+
+    } catch (err) {
+      if (err.name !== 'AbortError' && err.name !== 'BreakError') {
+        log('⚠️ 读取错误: ' + err.message, 'err');
+      } else {
+        log('🔌 读循环正常终止', 'info');
+      }
+      break;
+    }
+  }
+
+  // 读循环结束后自动清理
+  if (!keepReading) {
+    // 正常断开，啥也不做
+  } else {
+    // 异常退出
+    log('⚠️ 读循环异常退出，请重新连接', 'warn');
+    await cleanupSerial();
+  }
+}
+
+// ============================================================
+//  连接 / 断开
+// ============================================================
+async function connect() {
+  let selectedPort;
+  try {
+    selectedPort = await navigator.serial.requestPort({});
+  } catch {
+    log('用户取消了端口选择', 'warn');
+    return;
+  }
+
+  const baud = parseInt(document.getElementById('baudSelect').value);
+
+  try {
+    await selectedPort.open({ baudRate: baud });
+
+    // 检查 readable / writable
+    if (!selectedPort.readable || !selectedPort.writable) {
+      log('❌ 该串口不支持读写', 'err');
+      try { await selectedPort.close(); } catch {}
+      return;
+    }
+
+    port = selectedPort;
+    keepReading = true;
+    window._gotFirstFrame = false;
+
+    // === 写：直接使用 WritableStream 的 writer ===
+    const textEncoder = new TextEncoder();
+    writer = port.writable.getWriter();
+
+    // === 读：使用 ReadableStream 的 reader ===
+    reader = port.readable.getReader();
+
+    // 更新 UI
+    document.getElementById('btnConnect').textContent = '断开';
+    document.getElementById('btnConnect').className = 'disconnect';
+    document.getElementById('statusLed').className = 'status online';
+    document.getElementById('statusText').textContent = `已连接 ${baud} bps`;
+    log(`✅ 已连接 @ ${baud} bps`, 'ok');
+
+    refreshPortList();
+
+    // 启动读循环
+    readLoop();
+  } catch (err) {
+    log('❌ 连接失败: ' + err.message, 'err');
+  }
+}
+
+async function cleanupSerial() {
+  keepReading = false;
+
+  // 关闭 writer，释放 writable 的锁
+  if (writer) {
+    try { await writer.close(); } catch (e) { /* writer may already be closed */ }
+    try { writer.releaseLock(); } catch {}
+    writer = null;
+  }
+
+  // 关闭 reader，释放 readable 的锁
+  if (reader) {
+    try { reader.cancel(); } catch {}
+    try { reader.releaseLock(); } catch {}
+    reader = null;
+  }
+
+  // 关闭端口
+  if (port) {
+    try { await port.close(); } catch (e) { log('关闭端口时: ' + e.message, 'warn'); }
+    port = null;
+  }
+
+  buf = new Uint8Array(0);
+}
+
+async function disconnect() {
+  await cleanupSerial();
+
+  document.getElementById('btnConnect').textContent = '连接';
+  document.getElementById('btnConnect').className = '';
+  document.getElementById('statusLed').className = 'status';
+  document.getElementById('statusText').textContent = '未连接';
+  log('🔌 已断开连接', 'warn');
+}
+
+// ============================================================
+//  发送命令
+// ============================================================
+async function sendCommand(cmd) {
+  if (!writer) { log('未连接，无法发送', 'err'); return; }
+  const payload = '$' + cmd + '\n';
+  try {
+    await writer.write(new TextEncoder().encode(payload));
+    log('→ $' + cmd, 'info');
+  } catch (err) {
+    log('发送失败: ' + err.message, 'err');
+  }
+}
+
+// ============================================================
+//  刷新端口列表
+// ============================================================
+async function refreshPortList() {
+  try {
+    const ports = await navigator.serial.getPorts();
+    const sel = document.getElementById('portSelect');
+    sel.innerHTML = '<option value="">选择端口…</option>';
+    ports.forEach(p => {
+      const info = p.getInfo();
+      const label = info.usbProductId
+        ? `USB 设备 (VID:${info.usbVendorId} PID:${info.usbProductId})`
+        : `串口 (VID:${info.usbVendorId})`;
+      const opt = document.createElement('option');
+      opt.value = label;
+      opt.textContent = label;
+      sel.appendChild(opt);
+    });
+  } catch {}
+}
+
+// ============================================================
+//  DOM 事件绑定
+// ============================================================
+document.getElementById('btnConnect').addEventListener('click', () => {
+  if (port) disconnect();
+  else connect();
+});
+
+document.getElementById('btnSendCmd').addEventListener('click', () => {
+  const input = document.getElementById('cmdInput');
+  const cmd = input.value.trim();
+  if (cmd) { sendCommand(cmd); input.value = ''; }
+});
+document.getElementById('cmdInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('btnSendCmd').click();
+});
+
+// 快捷命令按钮
+document.querySelectorAll('.cmd-quick button').forEach(btn => {
+  btn.addEventListener('click', () => sendCommand(btn.dataset.cmd));
+});
+
+// 自动刷新端口列表
+refreshPortList();
+setInterval(refreshPortList, 3000);
+
+log('💡 点击"连接"选择串口设备', 'info');
+log('💡 支持 JustFloat 6 通道 + 文本命令响应', 'info');
+
+// ============================================================
+//  自动清理
+// ============================================================
+window.addEventListener('beforeunload', () => {
+  if (port) disconnect();
+});
+</script>
+</body>
+</html>
