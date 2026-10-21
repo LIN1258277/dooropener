@@ -1,0 +1,252 @@
+   // ===== 刷新 Live Watch 的 raw 数据 =====
+            // cnt 直接读寄存器原始值，不经过任何换算，最能看出
+            // "编码器到底有没有脉冲进来"；delta/rpm 是软件换算的结果。
+            g_enc1_cnt   = __HAL_TIM_GET_COUNTER(&htim2);
+            g_enc1_delta = motor1.get_last_encoder();
+            g_enc1_rpm   = motor1.get_speed();
+            g_m1_mode    = (int32_t)motor1.get_mode();
+            g_m1_pwm     = motor1.get_pwm();
+            g_m1_scmd    = motor1.get_speed_cmd();
+            g_m1_vref    = motor1.get_v_ref();
+            g_m1_astate  = (int32_t)motor1.get_angle_state();
+            g_enc2_cnt   = __HAL_TIM_GET_COUNTER(&htim3);
+            g_enc2_delta = motor2.get_last_encoder();
+            g_enc2_rpm   = motor2.get_speed();
+            g_m2_mode    = (int32_t)motor2.get_mode();
+            g_m2_pwm     = motor2.get_pwm();
+            g_m2_scmd    = motor2.get_speed_cmd();
+            g_m2_vref    = motor2.get_v_ref();
+            g_m2_astate  = (int32_t)motor2.get_angle_state();
+  
+  
+  
+  // ===== 处理文本命令（串口助手/网页请求） =====
+        if (uart1.has_command()) {
+            char cmd[32];
+            uart1.get_command(cmd, sizeof(cmd));
+
+            char *arg = strchr(cmd, ' ');
+            if (arg != nullptr) {
+                *arg = '\0';
+                arg++;
+            }
+
+            if (strcmp(cmd, "help") == 0) {
+                uart1.send_text("--- Available commands ---\r\n");
+                uart1.send_text("spd1 [val] / spd2 [val]    Speed mode + target speed (rpm)\r\n");
+                uart1.send_text("ang1 [val] / ang2 [val]    Angle mode + target angle (counts)\r\n");
+                uart1.send_text("ang1r [val] / ang2r [val]  Angle mode, target = current + val\r\n");
+                uart1.send_text("mode1/mode2 spd|ang|stop   Switch mode only\r\n");
+                uart1.send_text("stop / stop1 / stop2       Emergency stop (IDLE)\r\n");
+                uart1.send_text("pwm1 [val] / pwm2 [val]    Open-loop PWM (debug)\r\n");
+                uart1.send_text("enc1 / enc2                Motor encoder\r\n");
+                uart1.send_text("kp/ki/kd [val]             Speed PID (val=write, none=read)\r\n");
+                uart1.send_text("akp/aki/akd [val]          Angle PID (val=write, none=read)\r\n");
+                uart1.send_text("pid skp ski skd akp aki akd  Set all 6 PID params\r\n");
+                uart1.send_text("prof vc amax jmax vcreep   Angle S-curve profile (rpm)\r\n");
+                uart1.send_text("lpf [alpha]                Speed 1st-order LPF (0<a<=1, 1=off)\r\n");
+                uart1.send_text("rst                        Reset PID internal state\r\n");
+                uart1.send_text("all                        All values\r\n");
+            }
+            // ===== 速度模式 + 目标转速 (rpm) =====
+            else if (strcmp(cmd, "spd1") == 0 || strcmp(cmd, "spd2") == 0) {
+                Motor *mot = (cmd[3] == '1') ? &motor1 : &motor2;
+                if (arg != nullptr) {
+                    // 只设目标 + 选模式，绝不直接写 PWM：
+                    // 输出交给 20ms 节拍，否则命令一到达电机就立刻跳变
+                    mot->set_target_speed((float)atof(arg));
+                    mot->set_mode(MOTOR_SPEED);           // 自动切到速度模式
+                    uart1.send_named_float((cmd[3] == '1') ? "motor1_target_speed"
+                                                           : "motor2_target_speed",
+                                           mot->target_speed);
+                }
+                uart1.send_named_float((cmd[3] == '1') ? "motor1_speed" : "motor2_speed",
+                                       mot->get_speed());
+            }
+            else if (strcmp(cmd, "enc1") == 0) {
+                uart1.send_named_int("motor1_encoder", motor1.get_encoder());
+            }
+            else if (strcmp(cmd, "enc2") == 0) {
+                uart1.send_named_int("motor2_encoder", motor2.get_encoder());
+            }
+            // ===== 角度模式 + 目标位置（绝对，单位 = 编码器计数）=====
+            else if (strcmp(cmd, "ang1") == 0 || strcmp(cmd, "ang2") == 0) {
+                Motor *mot = (cmd[3] == '1') ? &motor1 : &motor2;
+                if (arg != nullptr) {
+                    // 只设目标；闭环由 20ms 节拍里的 Motor::update() 持续推进
+                    mot->set_target_angle((float)atof(arg));
+                    mot->set_mode(MOTOR_ANGLE);
+                }
+                uart1.send_named_float((cmd[3] == '1') ? "motor1_angle" : "motor2_angle",
+                                       mot->target_angle);
+                uart1.send_named_float((cmd[3] == '1') ? "motor1_pos" : "motor2_pos",
+                                       (float)mot->get_encoder());
+            }
+            // ===== 相对当前位置转动：$ang1r <counts> =====
+            else if (strcmp(cmd, "ang1r") == 0 || strcmp(cmd, "ang2r") == 0) {
+                Motor *mot = (cmd[3] == '1') ? &motor1 : &motor2;
+                if (arg != nullptr) {
+                    mot->set_target_angle_relative((float)atof(arg));
+                    mot->set_mode(MOTOR_ANGLE);
+                }
+                uart1.send_named_float((cmd[3] == '1') ? "motor1_angle" : "motor2_angle",
+                                       mot->target_angle);
+            }
+            // ===== 只切模式、不改目标：$mode1 spd|ang|stop|open =====
+            else if (strcmp(cmd, "mode1") == 0 || strcmp(cmd, "mode2") == 0) {
+                Motor *mot = (cmd[4] == '1') ? &motor1 : &motor2;
+                if (arg != nullptr) {
+                    if (strncmp(arg, "ang", 3) == 0) {
+                        // 基准同步到当前位置：否则 target_angle 还是旧值(比如 0)，
+                        // 一进角度模式就以限幅速度冲过去，门被猛拽一下
+                        mot->set_target_angle((float)mot->get_encoder());
+                        mot->set_mode(MOTOR_ANGLE);
+                    } else if (strncmp(arg, "spd", 3) == 0) {
+                        // 角度模式里 target_speed 只是内环指令、值已无意义，
+                        // 切换时清零，避免"切回速度模式电机自己跑起来"
+                        mot->set_target_speed(0.0f);
+                        mot->set_mode(MOTOR_SPEED);
+                    } else if (strncmp(arg, "open", 4) == 0) {
+                        mot->set_mode(MOTOR_OPENLOOP);
+                    } else {
+                        mot->set_target_speed(0.0f);
+                        mot->set_mode(MOTOR_IDLE);        // stop / 其它
+                    }
+                }
+                uart1.send_named_int((cmd[4] == '1') ? "mode1" : "mode2",
+                                     (int32_t)mot->get_mode());
+            }
+            // ===== 急停：$stop / $stop1 / $stop2 =====
+            else if (strcmp(cmd, "stop") == 0 || strcmp(cmd, "stop1") == 0 || strcmp(cmd, "stop2") == 0) {
+                if (cmd[4] != '2') { motor1.set_target_speed(0.0f); motor1.set_mode(MOTOR_IDLE); }
+                if (cmd[4] != '1') { motor2.set_target_speed(0.0f); motor2.set_mode(MOTOR_IDLE); }
+                uart1.send_text("stopped\r\n");
+            }
+            // ===== 开环直给 PWM：区分"电机不转"还是"编码器不计数" =====
+            else if (strcmp(cmd, "pwm1") == 0 || strcmp(cmd, "pwm2") == 0) {
+                Motor *mot = (cmd[3] == '1') ? &motor1 : &motor2;
+                if (arg != nullptr) {
+                    mot->set_mode(MOTOR_OPENLOOP);
+                    mot->set_output((int)atof(arg));
+                }
+                uart1.send_named_int((cmd[3] == '1') ? "motor1_pwm" : "motor2_pwm",
+                                     mot->get_pwm());
+            }
+            // ===== 清 PID 内部状态（积分/历史误差）=====
+            else if (strcmp(cmd, "rst") == 0) {
+                motor1.reset_pid();
+                motor2.reset_pid();
+                uart1.send_text("pid state reset\r\n");
+            }
+            // ===== 速度一阶低通系数：带参数=写入，不带参数=查询 =====
+            // α ∈ (0,1]：越小越平滑、滞后越大；α=1 等于关闭滤波。
+            // 默认 0.30（τ≈47ms），非法值会被 Motor 忽略并保持原值。
+            else if (strcmp(cmd, "lpf") == 0) {
+                if (arg != nullptr) {
+                    float alpha = (float)atof(arg);
+                    motor1.set_speed_lpf(alpha);
+                    motor2.set_speed_lpf(alpha);
+                }
+                uart1.send_named_float("speed_lpf", motor1.get_speed_lpf());
+            }
+            // ===== PID 参数：带参数=写入，不带参数=查询 =====
+            else if (strcmp(cmd, "kp") == 0) {
+                if (arg != nullptr) { pid_speed.kp = (float)atof(arg); apply_pid_to_motors(); }
+                uart1.send_named_float("speed_kp", pid_speed.kp);
+            }
+            else if (strcmp(cmd, "ki") == 0) {
+                if (arg != nullptr) { pid_speed.ki = (float)atof(arg); apply_pid_to_motors(); }
+                uart1.send_named_float("speed_ki", pid_speed.ki);
+            }
+            else if (strcmp(cmd, "kd") == 0) {
+                if (arg != nullptr) { pid_speed.kd = (float)atof(arg); apply_pid_to_motors(); }
+                uart1.send_named_float("speed_kd", pid_speed.kd);
+            }
+            else if (strcmp(cmd, "akp") == 0) {
+                if (arg != nullptr) { pid_angle.kp = (float)atof(arg); apply_pid_to_motors(); }
+                uart1.send_named_float("angle_kp", pid_angle.kp);
+            }
+            else if (strcmp(cmd, "aki") == 0) {
+                if (arg != nullptr) { pid_angle.ki = (float)atof(arg); apply_pid_to_motors(); }
+                uart1.send_named_float("angle_ki", pid_angle.ki);
+            }
+            else if (strcmp(cmd, "akd") == 0) {
+                if (arg != nullptr) { pid_angle.kd = (float)atof(arg); apply_pid_to_motors(); }
+                uart1.send_named_float("angle_kd", pid_angle.kd);
+            }
+            // ===== 一行下发全部 6 个参数：$pid skp ski skd akp aki akd =====
+            else if (strcmp(cmd, "pid") == 0) {
+                float v[6] = {0};
+                int n = 0;
+                if (arg != nullptr) {
+                    for (char *t = strtok(arg, " "); t != nullptr && n < 6; t = strtok(nullptr, " ")) {
+                        v[n++] = (float)atof(t);
+                    }
+                }
+                if (n == 6) {
+                    pid_speed.kp = v[0]; pid_speed.ki = v[1]; pid_speed.kd = v[2];
+                    pid_angle.kp = v[3]; pid_angle.ki = v[4]; pid_angle.kd = v[5];
+                    apply_pid_to_motors();
+                    uart1.send_text("pid updated\r\n");
+                } else {
+                    uart1.send_text("usage: $pid skp ski skd akp aki akd\r\n");
+                }
+                uart1.send_named_float("speed_kp", pid_speed.kp);
+                uart1.send_named_float("speed_ki", pid_speed.ki);
+                uart1.send_named_float("speed_kd", pid_speed.kd);
+                uart1.send_named_float("angle_kp", pid_angle.kp);
+                uart1.send_named_float("angle_ki", pid_angle.ki);
+                uart1.send_named_float("angle_kd", pid_angle.kd);
+            }
+            // ===== S 曲线运动规划参数：$prof <vcruise> <amax> <jmax> <vcreep> =====
+            // 不带参数就只回显当前值（默认值写在 motor.cpp 顶部）
+            else if (strcmp(cmd, "prof") == 0) {
+                float v[4] = {0};
+                int n = 0;
+                if (arg != nullptr) {
+                    for (char *t = strtok(arg, " "); t != nullptr && n < 4; t = strtok(nullptr, " ")) {
+                        v[n++] = (float)atof(t);
+                    }
+                }
+                if (n == 4) {
+                    motor1.set_angle_profile(v[0], v[1], v[2], v[3]);
+                    motor2.set_angle_profile(v[0], v[1], v[2], v[3]);
+                } else if (n != 0) {
+                    uart1.send_text("usage: $prof vcruise amax jmax vcreep\r\n");
+                }
+                float vc, am, jm, vcr;
+                motor1.get_angle_profile(&vc, &am, &jm, &vcr);
+                uart1.send_named_float("prof_v_cruise", vc);
+                uart1.send_named_float("prof_a_max", am);
+                uart1.send_named_float("prof_j_max", jm);
+                uart1.send_named_float("prof_v_creep", vcr);
+            }
+            else if (strcmp(cmd, "all") == 0) {
+                uart1.send_named_int("m1_mode", (int32_t)motor1.get_mode());
+                uart1.send_named_int("m1_astate", (int32_t)motor1.get_angle_state());
+                uart1.send_named_int("m1_pwm", motor1.get_pwm());
+                uart1.send_named_float("m1_speed_cmd", motor1.get_speed_cmd());
+                uart1.send_named_float("m1_v_ref", motor1.get_v_ref());
+                uart1.send_named_float("m1_speed", motor1.get_speed());
+                uart1.send_named_float("m1_speed_raw", motor1.get_speed_raw());
+                uart1.send_named_float("m1_encoder", (float)motor1.get_encoder());
+                uart1.send_named_float("m1_target_speed", motor1.target_speed);
+                uart1.send_named_float("m1_target_angle", motor1.target_angle);
+                uart1.send_named_int("m2_mode", (int32_t)motor2.get_mode());
+                uart1.send_named_int("m2_pwm", motor2.get_pwm());
+                uart1.send_named_float("m2_speed", motor2.get_speed());
+                uart1.send_named_float("m2_speed_raw", motor2.get_speed_raw());
+                uart1.send_named_float("m2_encoder", (float)motor2.get_encoder());
+                uart1.send_named_float("m2_target_speed", motor2.target_speed);
+                uart1.send_named_float("m2_target_angle", motor2.target_angle);
+                uart1.send_named_float("speed_kp", pid_speed.kp);
+                uart1.send_named_float("speed_ki", pid_speed.ki);
+                uart1.send_named_float("speed_kd", pid_speed.kd);
+                uart1.send_named_float("angle_kp", pid_angle.kp);
+                uart1.send_named_float("angle_ki", pid_angle.ki);
+                uart1.send_named_float("angle_kd", pid_angle.kd);
+            }
+            else {
+                uart1.send_text("unknown cmd, send $help\r\n");
+            }
+        }

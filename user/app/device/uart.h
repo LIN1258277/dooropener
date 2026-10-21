@@ -42,10 +42,26 @@ public:
     // 获取UART句柄
     UART_HandleTypeDef *get_handle() { return huart; }
 
-    // 用于HAL C回调桥接的实例指针
-    static Uart *instance;
+    // ===== 原始字节回调（私有协议使用）=====
+    // 设置后，该 Uart 收到的每个字节都直接回调 handler，
+    // 不再进入"$文本命令 / 24字节PID帧"的解析逻辑。
+    // 指纹模组这类二进制协议由调用者自己解析。
+    typedef void (*ByteHandler)(uint8_t byte);
+    void set_byte_handler(ByteHandler handler) { byte_handler = handler; }
+
+    // 多实例分发：HAL 回调只拿到 huart 句柄，
+    // 由这里按句柄找到对应实例并派发字节。
+    static void dispatch(UART_HandleTypeDef *handle);
+
+    // 串口错误（溢出/噪声/帧错误）后重新 arm 接收，
+    // 避免指纹模组断电期间浮空 RX 引入一次错误就让接收永久停摆。
+    static void recover(UART_HandleTypeDef *handle);
 
 private:
+    enum { UART_MAX_INSTANCES = 4 };
+    static Uart *instances[UART_MAX_INSTANCES];
+    static uint8_t instance_count;
+
     UART_HandleTypeDef *huart;
     uint8_t rx_buffer[24];      // 6 floats * 4 bytes
     uint8_t rx_index;           // 当前接收索引
@@ -59,4 +75,6 @@ private:
     uint8_t cmd_length;         // 完成命令的长度
     bool cmd_ready;             // 命令就绪标志
     bool text_mode;             // 当前是否处于文本命令模式（以 '$' 开头）
+
+    ByteHandler byte_handler;   // 非空时走原始字节回调（私有协议）
 };

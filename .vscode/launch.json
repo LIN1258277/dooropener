@@ -4,6 +4,37 @@
     // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+
+        
+      
+        {
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/Debug/dooropener.elf",
+            "name": "Debug with ST-Link (Live Watch)",
+            "request": "launch",
+            "type": "cortex-debug",
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "none",
+            "servertype": "stlink",
+            "device": "STM32F103C8",
+            "interface": "swd",
+
+            "gdbPath": "E:/stm/STM32CubeCLT_1.18.0/GNU-tools-for-STM32/bin/arm-none-eabi-gdb.exe",
+            // ST-LINK_gdbserver 及其依赖的 CubeProgrammer，同样不在默认位置
+            "serverpath": "E:/stm/STM32CubeCLT_1.18.0/STLink-gdb-server/bin/ST-LINK_gdbserver.exe",
+            // "stlinkPath": "E:/stm/STM32CubeCLT_1.18.0/STLink-gdb-server/bin/ST-LINK_gdbserver.exe",
+            "stm32cubeprogrammer": "E:/stm/STM32CubeCLT_1.18.0/STM32CubeProgrammer/bin",
+
+            // 外设寄存器视图，对看 TIM2/TIM3 的 CNT 很有用
+            "svdFile": "E:/stm/STM32CubeCLT_1.18.0/STMicroelectronics_CMSIS_SVD/STM32F103.svd",
+
+            // 不打断 CPU 地周期性采样全局变量（g_enc1_cnt / g_loop_count 等）
+            "liveWatch": {
+                "enabled": true,
+                "samplesPerSecond": 4
+            }
+        },
+
         {
             "type": "stlinkgdbtarget",
             "request": "launch",
@@ -16,7 +47,8 @@
                 {
                     "imageFileName": "${command:st-stm32-ide-debug-launch.get-projects-binary-from-context1}"
                 }
-            ]
+            ],
+   
         }
     ]
 }
