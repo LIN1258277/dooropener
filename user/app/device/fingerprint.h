@@ -17,7 +17,7 @@
  *  - 一次按压只上报一次：匹配后持续采图直到返回 0x02（无手指）才恢复扫描。
  * ========================================================================= */
 
-// 状态枚举（供 $fp 调试命令观察）
+// 状态枚举（供 Live Watch 观察）
 typedef enum {
     FP_STATE_BOOT_WAIT = 0,    // 上电后等待模组启动
     FP_STATE_SCAN_IDLE,        // 空闲，等待下一次采图
@@ -25,7 +25,7 @@ typedef enum {
     FP_STATE_FINGER_OFF_DELAY  // 匹配后等手指离开（两次采图之间的间隔）
 } fp_state_t;
 
-// 在途指令（供 $fp 调试命令观察）
+// 在途指令（供 Live Watch 观察）
 typedef enum {
     FP_INFLIGHT_NONE = 0,
     FP_INFLIGHT_READ_PARA,

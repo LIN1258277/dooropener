@@ -19,14 +19,14 @@
  *   α = 0.30 → τ ≈ 47ms，截止 ≈ 3.4Hz（默认，响应与降噪的折中）
  *   α = 1.00 → 等于关闭滤波，直接用原始转速
  * 注意：α 越小越平滑，但相位滞后越大 —— 速度环的响应会变慢。
- * 调参入口：串口 $lpf <alpha>（不带参数=查询）
+ * 改参数：直接改 SPEED_LPF_ALPHA_DEFAULT 并重新编译（串口在线调整入口已删除）。
  * ========================================================================= */
 static constexpr float SPEED_LPF_ALPHA_DEFAULT = 0.3f;
 
 /* 角度环输出（转速指令）的斜率限制，单位 rpm/s。
  * 位置 PID 在大误差时会立刻要求很高的转速，若不加限制，下发目标的瞬间
  * 转速指令就是阶跃，门会被猛拽一下。默认 200rpm/s（与旧 S 曲线的 a_max 一致），
- * 可用串口 $aslew <rpm/s> 在线调整。 */
+ * 改参数请直接改这个常量。 */
 static constexpr float ANGLE_SPEED_SLEW_DEFAULT = 200.0f;
 
 typedef enum
@@ -131,7 +131,7 @@ class Motor
         motor_mode_t get_mode() const { return mode; }
 
         // ===== 设定值：纯赋值，零副作用 =====
-        // 串口命令只改这两个值；真正的输出统一交给 update() 在控制节拍里完成。
+        // 只改设定值，真正的输出统一交给 update() 在控制节拍里完成。
         void set_target_speed(float rpm);              // 速度模式的目标转速 (rpm)
         void set_target_angle(float counts);           // 角度模式的目标位置 (编码器计数)
         void set_target_angle_relative(float counts);  // 目标 = 当前位置 + counts
@@ -183,7 +183,7 @@ class Motor
         void reset_position();
 
         // 实测转速 (rpm)：一阶低通滤波后的值。控制环与上位机都用它。
-        // 纯读取、无副作用 —— $spd1/$all 这类查询命令随便调，不会推进滤波器。
+        // 纯读取、无副作用 —— 观测代码随便调，不会推进滤波器。
         float get_speed();
 
         // 滤波前的原始转速 (rpm)：1 count = 9.09rpm 的量化台阶全在里面，
